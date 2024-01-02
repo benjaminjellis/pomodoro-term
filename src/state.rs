@@ -1,8 +1,7 @@
 use std::time::SystemTime;
 
 /// Default time is 25 minutes, represented here in micro-seconds
-const DEFAULT_TIMER_LENGTH: i128 = 60000000;
-// const DEFAULT_TIMER_LENGTH: i128 = 1500000000;
+const DEFAULT_TIMER_LENGTH: i128 = 1500000000;
 
 #[derive(Debug)]
 struct Timer {
