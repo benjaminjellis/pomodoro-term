@@ -1,7 +1,11 @@
 use std::time::SystemTime;
 
+use ratatui::widgets::TableState;
+use tui_input::Input;
+
 /// Default time is 25 minutes, represented here in micro-seconds
 const DEFAULT_TIMER_LENGTH: i128 = 1500000000;
+const DEFAULT_BREAK_TIMER_LENGTH: i128 = 300000000;
 
 #[derive(Debug)]
 struct Timer {
@@ -10,28 +14,29 @@ struct Timer {
     last_updated_time: SystemTime,
     /// Time remaining in micro-seconds
     last_recorded_time_remaining: i128,
-    next_colour: TimerColour,
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub(crate) enum TimerColour {
-    Red,
-    White,
+    timer_length: i128,
 }
 
 impl Timer {
-    fn new() -> Self {
+    ///
+    /// # Arguments
+    /// * `length` - length of the timer in micro-seconds
+    fn new(length: i128) -> Self {
         Self {
             running: false,
             finished: false,
-            last_recorded_time_remaining: DEFAULT_TIMER_LENGTH,
+            last_recorded_time_remaining: length,
+            timer_length: length,
             last_updated_time: SystemTime::now(),
-            next_colour: TimerColour::Red,
         }
     }
 
     fn reset(&mut self) {
-        *self = Self::new();
+        *self = Self::new(self.timer_length);
+    }
+
+    fn get_length(&self) -> i128 {
+        micro_seconds_to_seconds(self.timer_length)
     }
 
     fn start(&mut self) {
@@ -43,14 +48,24 @@ impl Timer {
         self.running = false;
     }
 
-    pub(crate) fn get_time_remaining(&mut self) -> i128 {
+    /// Get the state of the timer
+    ///
+    /// # Returns
+    /// the time remaining, the time elapsed
+    pub(crate) fn get_state(&mut self) -> (i128, i128) {
+        let time_remaining = self.get_time_remaining();
+        let time_elapsed = micro_seconds_to_seconds(self.timer_length) - time_remaining;
+        (time_remaining, time_elapsed)
+    }
+
+    fn get_time_remaining(&mut self) -> i128 {
         if self.running {
             // find out how long has elapsed since the time remaining was calculated
-            let elapsed_since_last_upated =
+            let elapsed_since_last_updated =
                 self.last_updated_time.elapsed().unwrap().as_micros() as i128;
 
             // figure out the time remaining
-            let time_remaining_μs = self.last_recorded_time_remaining - elapsed_since_last_upated;
+            let time_remaining_μs = self.last_recorded_time_remaining - elapsed_since_last_updated;
 
             // update the state with the time we calculate
             self.last_updated_time = SystemTime::now();
@@ -66,47 +81,90 @@ impl Timer {
             } else {
                 self.last_recorded_time_remaining = time_remaining_μs;
 
-                time_remaining_μs / 1000000
+                micro_seconds_to_seconds(time_remaining_μs)
             }
         } else {
-            self.last_recorded_time_remaining / 1000000
+            micro_seconds_to_seconds(self.last_recorded_time_remaining)
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::Timer;
+fn micro_seconds_to_seconds(micro_seconds: i128) -> i128 {
+    micro_seconds / 1000000
+}
 
-    #[test]
-    fn test_timer() {
-        let mut timer = Timer::new();
-        dbg!(&timer);
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Mode {
+    Normal,
+    Insert,
+    Edit,
+    Break,
+}
 
-        timer.start();
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        timer.get_time_remaining();
-        dbg!(&timer);
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        let ts = timer.get_time_remaining();
-        dbg!(ts);
-
-        dbg!(&timer);
-        panic!("I just want to see results");
-    }
+#[derive(Clone, Debug)]
+pub(crate) struct Task {
+    pub(crate) completed: bool,
+    pub(crate) description: String,
+    pub(crate) estimation: i16,
 }
 
 #[derive(Debug)]
 pub(crate) struct State {
     timer: Timer,
+    break_timer: Timer,
     pomodoro_no: u16,
+    pub(crate) mode: Mode,
+    pub(crate) input: Input,
+    tasks: Vec<Task>,
+    pub(crate) task_table_state: TableState,
+    pub(crate) show_help_popup: bool,
 }
 
 impl State {
     pub(crate) fn new() -> Self {
         Self {
-            timer: Timer::new(),
+            timer: Timer::new(DEFAULT_TIMER_LENGTH),
+            break_timer: Timer::new(DEFAULT_BREAK_TIMER_LENGTH),
             pomodoro_no: 1,
+            mode: Mode::Normal,
+            input: Input::default(),
+            tasks: vec![],
+            task_table_state: TableState::default(),
+            show_help_popup: false,
+        }
+    }
+
+    pub(crate) fn get_pomodoro_no(&self) -> u16 {
+        self.pomodoro_no
+    }
+
+    pub(crate) fn start_break_timer(&mut self) {
+        self.mode = Mode::Break;
+        self.timer.pause();
+        self.break_timer.start();
+    }
+
+    pub(crate) fn reset_break_timer(&mut self) {
+        self.mode = Mode::Normal;
+        self.break_timer.reset();
+    }
+
+    pub(crate) fn get_tasks(&self) -> Vec<Task> {
+        self.tasks.clone()
+    }
+
+    pub(crate) fn add_new_task(&mut self, task_description: String) {
+        let new_task = Task {
+            completed: false,
+            description: task_description,
+            estimation: 0,
+        };
+        self.tasks.push(new_task);
+    }
+
+    pub(crate) fn delete_current_task(&mut self) {
+        if let Some(task_index) = self.task_table_state.selected() {
+            self.tasks.remove(task_index);
         }
     }
 
@@ -123,23 +181,69 @@ impl State {
         self.timer.pause();
     }
 
-    pub(crate) fn time_remaining(&mut self) -> i128 {
-        self.timer.get_time_remaining()
+    /// Get the state of the timer
+    ///
+    /// # Returns
+    /// the time remaining, the time elapsed
+    pub(crate) fn get_timer_state(&mut self) -> (i128, i128) {
+        self.timer.get_state()
     }
 
-    pub(crate) fn timer_is_finished(&mut self) -> bool {
+    /// Get the state of the break timer
+    ///
+    /// # Returns
+    /// the time remaining, the time elapsed
+    pub(crate) fn get_break_timer_state(&mut self) -> (i128, i128) {
+        self.break_timer.get_state()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn timer_is_finished(&self) -> bool {
         self.timer.finished
     }
 
-    pub(crate) fn next_timer_colour(&mut self) -> TimerColour {
-        match self.timer.next_colour {
-            TimerColour::Red => {
-                self.timer.next_colour = TimerColour::White;
+    pub(crate) fn timer_length(&self) -> i128 {
+        self.timer.get_length()
+    }
+
+    pub(crate) fn get_break_timer_length(&self) -> i128 {
+        self.break_timer.get_length()
+    }
+
+    pub fn next_table_row(&mut self) {
+        let i = if let Some(i) = self.task_table_state.selected() {
+            if i >= self.tasks.len() - 1 {
+                0
+            } else {
+                i + 1
             }
-            TimerColour::White => {
-                self.timer.next_colour = TimerColour::Red;
-            }
+        } else {
+            0
+        };
+        self.task_table_state.select(Some(i));
+    }
+
+    pub(crate) fn mark_current_task_as_completed(&mut self) {
+        if let Some(i) = self.task_table_state.selected() {
+            let task_item = self.tasks.get_mut(i).unwrap();
+            task_item.completed = true;
         }
-        self.timer.next_colour
+    }
+
+    pub fn previous_table_row(&mut self) {
+        let i = if let Some(i) = self.task_table_state.selected() {
+            if i == 0 {
+                self.tasks.len() - 1
+            } else {
+                i - 1
+            }
+        } else {
+            0
+        };
+        self.task_table_state.select(Some(i));
+    }
+
+    pub(crate) fn unselect_table_item(&mut self) {
+        self.task_table_state.select(None);
     }
 }
