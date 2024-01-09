@@ -12,6 +12,7 @@ To install simply clone this repo and run the install script (note this requires
 ```
 
 ## demo (TODO)
+<img src="./assets/demo.png" alt="demo" width="500"/>
 
 to start run 
 
