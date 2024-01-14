@@ -6,7 +6,6 @@ use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{backend::Backend, Terminal};
 use tui_input::backend::crossterm::EventHandler;
-
 pub(crate) fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut state: State) -> Result<()> {
     loop {
         terminal.draw(|f| ui(f, &mut state))?;
